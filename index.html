@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AURA</title>
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script type="module">
+        import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+        window.FilesetResolver = FilesetResolver;
+        window.HandLandmarker = HandLandmarker;
+    </script>
+    
+    <style>
+        /* --- CORE --- */
+        body { margin: 0; background-color: #000; height: 100vh; overflow: hidden; font-family: 'Rajdhani', sans-serif; color: white; perspective: 1500px; user-select: none; }
+        
+        /* --- CINEMATIC LANDING PAGE (RESTORED) --- */
+        #landing { 
+            position: absolute; width: 100%; height: 100%; z-index: 500; 
+            background: radial-gradient(circle at center, #1a1a2e 0%, #000 90%);
+            display: flex; flex-direction: column; align-items: center; justify-content: center; 
+            transition: opacity 0.8s ease-in-out; overflow: hidden;
+        }
+        #landing.hidden { opacity: 0; pointer-events: none; }
+
+        /* Moving Grid Floor */
+        .landing-grid {
+            position: absolute; bottom: -50%; left: -50%; width: 200%; height: 100%;
+            background-image: 
+                linear-gradient(rgba(0, 243, 255, 0.3) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 243, 255, 0.3) 1px, transparent 1px);
+            background-size: 100px 100px;
+            transform: rotateX(60deg);
+            animation: gridMove 20s linear infinite;
+            mask-image: linear-gradient(to top, rgba(0,0,0,1) 0%, transparent 60%);
+            z-index: 0; pointer-events: none;
+        }
+        @keyframes gridMove { 0% { transform: rotateX(60deg) translateY(0); } 100% { transform: rotateX(60deg) translateY(100px); } }
+
+        /* Hero Typography */
+        .landing-content { z-index: 10; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 30px; }
+        .hero-title {
+            font-size: 8rem; font-weight: 700; letter-spacing: 20px; margin: 0;
+            background: linear-gradient(to bottom, #fff, #888); background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            text-shadow: 0 0 50px rgba(0, 243, 255, 0.4);
+            animation: glowPulse 4s infinite ease-in-out;
+        }
+        .hero-subtitle {
+            font-size: 1.2rem; letter-spacing: 8px; color: #00f3ff; text-transform: uppercase;
+            opacity: 0.8; margin-top: -20px;
+        }
+
+        /* Glass Button */
+        .upload-btn {
+            padding: 18px 60px; 
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(0, 243, 255, 0.5);
+            border-radius: 50px; 
+            color: #fff; font-size: 1.1rem; font-weight: 700; letter-spacing: 4px;
+            cursor: pointer; backdrop-filter: blur(10px);
+            box-shadow: 0 0 20px rgba(0, 243, 255, 0.1);
+            transition: all 0.3s ease; position: relative; overflow: hidden;
+        }
+        .upload-btn::before {
+            content: ''; position: absolute; top: 0; left: -100%; width: 100%; height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(0, 243, 255, 0.4), transparent); transition: 0.5s;
+        }
+        .upload-btn:hover { background: rgba(0, 243, 255, 0.1); box-shadow: 0 0 50px rgba(0, 243, 255, 0.6); transform: scale(1.05); letter-spacing: 6px; }
+        .upload-btn:hover::before { left: 100%; }
+
+        /* Status Text */
+        #loading-text { font-family: 'Courier New', monospace; font-size: 0.9rem; color: #bc13fe; margin-top: 20px; min-height: 20px; letter-spacing: 2px; }
+        @keyframes glowPulse { 0%, 100% { text-shadow: 0 0 30px rgba(0,243,255,0.3); } 50% { text-shadow: 0 0 60px rgba(0,243,255,0.6); } }
+
+        /* --- APP LAYOUT --- */
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        .stage { position: relative; z-index: 10; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; transform-style: preserve-3d; }
+
+        .video-card { position: relative; width: 70vw; max-width: 1100px; aspect-ratio: 16/9; border-radius: 32px; transform-style: preserve-3d; box-shadow: 0 40px 90px rgba(0,0,0,0.7); cursor: pointer; }
+        #aura-canvas { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) translateZ(-150px) scale(1.3); width: 100%; height: 100%; filter: blur(120px) saturate(160%); opacity: 0.5; z-index: -1; border-radius: 50%; mix-blend-mode: screen; }
+        video { width: 100%; height: 100%; object-fit: cover; border-radius: 32px; display: block; border: 1px solid rgba(255,255,255,0.08); background: #000; position: relative; z-index: 2; }
+
+        /* CAMERA PREVIEW */
+        .cam-container { position: absolute; top: 20px; right: 20px; width: 160px; height: 120px; z-index: 200; pointer-events: none; }
+        .cam-preview { width: 100%; height: 100%; border-radius: 12px; border: 1px solid rgba(0, 243, 255, 0.3); opacity: 0; transition: opacity 0.3s; transform: scaleX(-1); background: #000; }
+        .cam-preview.visible { opacity: 0.8; }
+        #webcam { width: 100%; height: 100%; object-fit: cover; border-radius: 12px; }
+        .cam-toggle { position: absolute; top: -10px; right: -10px; width: 30px; height: 30px; background: rgba(20, 20, 30, 0.8); border: 1px solid rgba(255,255,255,0.2); border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; pointer-events: auto; color: #888; transition: 0.2s; }
+        .cam-toggle:hover { color: #00f3ff; border-color: #00f3ff; }
+        .cam-toggle svg { width: 16px; height: 16px; fill: currentColor; }
+
+        /* ZONES */
+        .hover-zone { position: absolute; top: 0; bottom: 0; width: 200px; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 50; }
+        .hover-zone.active { opacity: 1; }
+        .hover-zone-left { left: 0; background: linear-gradient(90deg, rgba(0, 243, 255, 0.4), transparent); }
+        .hover-zone-right { right: 0; background: linear-gradient(-90deg, rgba(0, 243, 255, 0.4), transparent); }
+        .zone-icon { font-size: 4rem; color: #fff; transform: scale(0.5); transition: transform 0.2s; text-shadow: 0 0 30px #00f3ff; }
+        .hover-zone.active .zone-icon { transform: scale(1.2); }
+
+        /* UI CONTROLS */
+        .nav-btn { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(20, 20, 30, 0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 50%; width: 80px; height: 80px; color: rgba(255,255,255,0.6); cursor: pointer; z-index: 100; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(20px); transition: 0.3s; }
+        .prev { left: 40px; } .next { right: 40px; }
+        .nav-btn.highlight { background: rgba(0, 243, 255, 0.3); color: white; transform: translateY(-50%) scale(1.1); box-shadow: 0 0 30px #00f3ff; }
+        .nav-btn svg { width: 36px; height: 36px; fill: currentColor; }
+
+        .controls-overlay { position: absolute; bottom: 0; left: 0; width: 100%; height: 130px; background: linear-gradient(to top, rgba(0,0,0,0.95), transparent); border-radius: 0 0 32px 32px; display: flex; flex-direction: column; justify-content: flex-end; padding: 25px 40px; box-sizing: border-box; z-index: 50; transition: opacity 0.8s ease; pointer-events: none; }
+        .progress-area { width: 100%; height: 30px; cursor: pointer; pointer-events: auto; display: flex; align-items: center; }
+        .progress-bg { width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 10px; position: relative; overflow: hidden; pointer-events: none;}
+        .progress-fill { position: absolute; top: 0; left: 0; height: 100%; width: 0%; background: #00f3ff; box-shadow: 0 0 10px rgba(0, 243, 255, 0.5); border-radius: 10px; pointer-events: none;}
+        .dock-row { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; height: 40px; pointer-events: auto; }
+        .time-display { font-size: 0.9rem; font-weight: 600; color: #888; letter-spacing: 1px; }
+
+        /* THEME DOCK */
+        .theme-dock { display: flex; gap: 10px; background: rgba(255,255,255,0.05); padding: 5px; border-radius: 20px; backdrop-filter: blur(5px); }
+        .theme-icon { width: 30px; height: 30px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; transition: 0.2s; color: #555; }
+        .theme-icon:hover { background: rgba(255,255,255,0.1); color: white; transform: scale(1.1); }
+        .theme-icon.active { background: #00f3ff; color: black; border-color: #00f3ff; box-shadow: 0 0 10px rgba(0,243,255,0.5); }
+
+        .info-panel { position: absolute; bottom: -100px; width: 100%; text-align: center; transition: opacity 0.8s ease; }
+        .info-panel h1 { font-size: 2.2rem; margin: 0; text-transform: uppercase; letter-spacing: 8px; text-shadow: 0 0 30px rgba(0,0,0,0.5); }
+        .info-panel h2 { font-size: 1rem; color: #00f3ff; margin: 5px 0 0 0; letter-spacing: 3px; opacity: 0.8; }
+        .counter { font-size: 0.8rem; color: #555; margin-top: 5px; letter-spacing: 2px; }
+
+        .status-icon { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 80px; height: 80px; pointer-events: none; opacity: 0; background: rgba(0,0,0,0.4); border-radius: 50%; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(5px); z-index: 60; transition: opacity 0.3s, transform 0.3s; }
+        .status-icon.animate { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
+        .status-icon svg { width: 30px; height: 30px; fill: white; }
+
+        .theme-toast { position: absolute; top: 40px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); padding: 15px 30px; border-radius: 30px; border: 1px solid rgba(0, 243, 255, 0.3); backdrop-filter: blur(10px); opacity: 0; transition: opacity 0.5s; pointer-events: none; z-index: 200; letter-spacing: 3px; font-weight: bold; font-size: 1rem; color: #00f3ff; box-shadow: 0 0 20px rgba(0, 243, 255, 0.2); display: flex; align-items: center; gap: 10px;}
+        .theme-toast.visible { opacity: 1; }
+
+        body.idle { cursor: none; }
+        body.idle .nav-btn, body.idle .controls-overlay, body.idle .info-panel { opacity: 0; pointer-events: none; }
+    </style>
+</head>
+<body>
+
+    <div id="landing">
+        <div class="landing-grid"></div>
+        <div class="landing-content">
+            <h1 class="hero-title">AURA</h1>
+            <div class="hero-subtitle">Gesture Control System</div>
+            <button class="upload-btn" id="start-btn">INITIALIZE</button>
+            <div id="loading-text"></div>
+        </div>
+    </div>
+
+    <div id="theme-toast" class="theme-toast"><span id="toast-icon"></span> <span id="toast-text"></span></div>
+    <div id="canvas-container"></div>
+
+    <div class="cam-container">
+        <div class="cam-preview" id="cam-preview"><video id="webcam" autoplay playsinline></video></div>
+        <button class="cam-toggle" id="cam-toggle"><svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg></button>
+    </div>
+
+    <div class="hover-zone hover-zone-left" id="zone-left"><div class="zone-icon">◀</div></div>
+    <div class="hover-zone hover-zone-right" id="zone-right"><div class="zone-icon">▶</div></div>
+
+    <div class="stage">
+        <button class="nav-btn prev" id="prev-btn"><svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></button>
+        <div class="video-card" id="card">
+            <canvas id="aura-canvas"></canvas>
+            <video id="video" crossorigin="anonymous" playsinline></video>
+            <div class="status-icon" id="status-icon"><svg viewBox="0 0 24 24" id="icon-svg"><path d="M8 5v14l11-7z"/></svg></div>
+            
+            <div class="controls-overlay" id="controls">
+                <div class="progress-area" id="progress-area">
+                    <div class="progress-bg"><div class="progress-fill" id="progress-fill"></div></div>
+                </div>
+                <div class="dock-row">
+                    <div class="time-display"><span id="current-time">0:00</span> / <span id="duration">0:00</span></div>
+                    <div class="theme-dock">
+                        <div class="theme-icon active" onclick="switchTheme(0)" title="Nebula">✊</div>
+                        <div class="theme-icon" onclick="switchTheme(1)" title="Kaleido">☝️</div>
+                        <div class="theme-icon" onclick="switchTheme(2)" title="Glitch">✌️</div>
+                        <div class="theme-icon" onclick="switchTheme(3)" title="Vortex">🤟</div>
+                        <div class="theme-icon" onclick="switchTheme(4)" title="Liquid">🖖</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="info-panel" id="info-panel">
+                <h1 id="track-title">Loading...</h1><h2 id="track-artist">Artist</h2><div class="counter" id="track-counter">TRACK 0 / 0</div>
+            </div>
+        </div>
+        <button class="nav-btn next" id="next-btn"><svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></button>
+    </div>
+
+    <script type="module">
+        import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+        let handLandmarker=undefined, lastVideoTime=-1, gestureDebounce=0, navDebounce=0, lastThemeGesture=-1;
+        const videoElement = document.getElementById("webcam");
+
+        const createHandLandmarker = async () => {
+            updateStatus("DOWNLOADING AI MODELS...");
+            const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm");
+            handLandmarker = await HandLandmarker.createFromOptions(vision, { 
+                baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task", delegate: "GPU" }, 
+                runningMode: "VIDEO", 
+                numHands: 2 // ENABLE 2 HANDS FOR PROXIMITY CHECK
+            });
+            updateStatus("CONNECTING CAMERA...");
+            enableCam();
+        };
+        
+        function updateStatus(msg) { document.getElementById('loading-text').innerText = msg; }
+
+        function enableCam() { navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => { videoElement.srcObject = stream; videoElement.addEventListener("loadeddata", predictWebcam); initApp(); }); }
+        
+        async function predictWebcam() {
+            let startTimeMs = performance.now();
+            if (lastVideoTime !== videoElement.currentTime && handLandmarker) {
+                lastVideoTime = videoElement.currentTime;
+                const results = handLandmarker.detectForVideo(videoElement, startTimeMs);
+                
+                if (results.landmarks && results.landmarks.length > 0) {
+                    let closestHandIndex = 0; let maxScale = 0;
+                    for(let i=0; i < results.landmarks.length; i++) {
+                        const lm = results.landmarks[i];
+                        const size = Math.hypot(lm[0].x - lm[9].x, lm[0].y - lm[9].y);
+                        if(size > maxScale) { maxScale = size; closestHandIndex = i; }
+                    }
+                    processGestures(results.landmarks[closestHandIndex]);
+                } else resetZones();
+            }
+            window.requestAnimationFrame(predictWebcam);
+        }
+        
+        function processGestures(landmarks) {
+            const tips = [8, 12, 16, 20], pips = [6, 10, 14, 18]; let extendedFingers = 0;
+            tips.forEach((tip, index) => { if (landmarks[tip].y < landmarks[pips[index]].y) extendedFingers++; });
+            const thumbTip = landmarks[4], pinkyBase = landmarks[17];
+            if(Math.hypot(thumbTip.x - pinkyBase.x, thumbTip.y - pinkyBase.y) > 0.15) extendedFingers++;
+            if(extendedFingers > 5) extendedFingers = 5;
+
+            const handX = landmarks[9].x; 
+            if (handX < 0.15) { activateZone('right'); navDebounce++; if(navDebounce > 30) { triggerNext(); navDebounce = -30; } } 
+            else if (handX > 0.85) { activateZone('left'); navDebounce++; if(navDebounce > 30) { triggerPrev(); navDebounce = -30; } } 
+            else { resetZones(); navDebounce = 0; }
+
+            if(handX > 0.2 && handX < 0.8) {
+                if(extendedFingers === 5) { gestureDebounce++; if(gestureDebounce > 20) { togglePlay(); gestureDebounce = -30; } } 
+                else {
+                    if(extendedFingers !== lastThemeGesture) {
+                        gestureDebounce++;
+                        if(gestureDebounce > 15) { window.switchTheme(extendedFingers); lastThemeGesture = extendedFingers; gestureDebounce = 0; }
+                    } else gestureDebounce = 0;
+                }
+            }
+        }
+
+        function activateZone(side) { if(side==='right') { document.getElementById('zone-right').classList.add('active'); document.getElementById('next-btn').classList.add('highlight'); } else { document.getElementById('zone-left').classList.add('active'); document.getElementById('prev-btn').classList.add('highlight'); } }
+        function resetZones() { document.getElementById('zone-right').classList.remove('active'); document.getElementById('zone-left').classList.remove('active'); document.getElementById('next-btn').classList.remove('highlight'); document.getElementById('prev-btn').classList.remove('highlight'); }
+        function togglePlay() { document.getElementById('card').click(); }
+        function triggerNext() { document.getElementById('next-btn').click(); resetZones(); }
+        function triggerPrev() { document.getElementById('prev-btn').click(); resetZones(); }
+        
+        document.getElementById('start-btn').addEventListener('click', () => { document.getElementById('start-btn').style.display = 'none'; document.getElementById('loading-text').style.display = 'block'; createHandLandmarker(); });
+        function initApp() { fetch('playlist.json').then(r=>r.json()).then(d=>{ window.playlist=d; document.getElementById('landing').classList.add('hidden'); setupAudio(); loadTrack(0); resetIdleTimer(); }).catch(e=>console.error("JSON Error",e)); }
+    </script>
+
+    <script>
+        const camToggle = document.getElementById('cam-toggle'); const camPreview = document.getElementById('cam-preview');
+        camToggle.addEventListener('click', () => { camPreview.classList.toggle('visible'); camToggle.style.color = camPreview.classList.contains('visible') ? '#00f3ff' : '#888'; });
+
+        let currentTheme = 0; 
+        const themes = [{ name: "NEBULA", icon: "✊" }, { name: "KALEIDOSCOPE", icon: "☝️" }, { name: "CYBER GLITCH", icon: "✌️" }, { name: "VORTEX TUNNEL", icon: "🤟" }, { name: "LIQUID GOLD", icon: "🖖" }];
+
+        window.switchTheme = function(index) {
+            if(index < 0 || index >= themes.length) return; 
+            currentTheme = index; const t = themes[index];
+            const toast = document.getElementById('theme-toast'); document.getElementById('toast-icon').innerText = t.icon; document.getElementById('toast-text').innerText = t.name;
+            toast.classList.add('visible'); setTimeout(() => toast.classList.remove('visible'), 2000);
+
+            document.querySelectorAll('.theme-icon').forEach((btn, i) => { if(i === index) btn.classList.add('active'); else btn.classList.remove('active'); });
+
+            if(currentTheme === 1) { 
+                if(kaleidoPlane) kaleidoPlane.visible = true; 
+                if(particleSystem) particleSystem.visible = false; 
+            } else { 
+                if(kaleidoPlane) kaleidoPlane.visible = false; 
+                if(particleSystem) { particleSystem.visible = true; particleSystem.material.uniforms.uTheme.value = currentTheme; }
+            }
+        }
+
+        const video = document.getElementById('video'); const card = document.getElementById('card'); const statusIcon = document.getElementById('status-icon'); const iconSvg = document.getElementById('icon-svg');
+        card.addEventListener('click', (e) => {
+            if(e.target.closest('.progress-area') || e.target.closest('.theme-dock')) return;
+            if(video.paused) { video.play(); showStatusIcon('play'); } else { video.pause(); showStatusIcon('pause'); }
+        });
+
+        function showStatusIcon(type) { if(type === 'play') iconSvg.innerHTML = '<path d="M8 5v14l11-7z"/>'; else iconSvg.innerHTML = '<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>'; statusIcon.classList.add('animate'); statusIcon.style.opacity = '1'; setTimeout(() => { statusIcon.style.opacity = '0'; statusIcon.classList.remove('animate'); }, 600); }
+
+        let targetX = 0, targetY = 0, currentX = 0, currentY = 0;
+        document.addEventListener('mousemove', (e) => { targetX = (window.innerWidth/2 - e.pageX)/350; targetY = (window.innerHeight/2 - e.pageY)/350; });
+        document.addEventListener('mouseleave', () => { targetX=0; targetY=0; });
+        function updatePhysics() { currentX += (targetX - currentX) * 0.08; currentY += (targetY - currentY) * 0.08; card.style.transform = `rotateY(${currentX}deg) rotateX(${currentY}deg)`; requestAnimationFrame(updatePhysics); }
+        updatePhysics();
+
+        window.playlist = []; let currentIndex = 0;
+        function loadTrack(index) { if(index < 0) index = window.playlist.length - 1; if(index >= window.playlist.length) index = 0; currentIndex = index; const track = window.playlist[index]; video.src = `videos/${track.filename}`; video.play(); updateUI(track); showStatusIcon('play'); }
+        function updateUI(track) { document.getElementById('track-title').innerText = track.title; document.getElementById('track-artist').innerText = track.artist; document.getElementById('track-counter').innerText = `TRACK ${currentIndex + 1} / ${window.playlist.length}`; }
+
+        const progressFill = document.getElementById('progress-fill'); const progressArea = document.getElementById('progress-area');
+        video.addEventListener('timeupdate', () => { if(video.duration) { const percent = (video.currentTime / video.duration) * 100; progressFill.style.width = `${percent}%`; document.getElementById('current-time').innerText = formatTime(video.currentTime); document.getElementById('duration').innerText = formatTime(video.duration); } });
+        progressArea.addEventListener('click', (e) => { e.stopPropagation(); if(!video.duration) return; const rect = progressArea.getBoundingClientRect(); video.currentTime = ((e.clientX - rect.left) / rect.width) * video.duration; });
+        function formatTime(s) { const m = Math.floor(s/60); const sc = Math.floor(s%60); return `${m}:${sc<10?'0':''}${sc}`; }
+        document.getElementById('next-btn').addEventListener('click', () => loadTrack(currentIndex + 1)); document.getElementById('prev-btn').addEventListener('click', () => loadTrack(currentIndex - 1)); video.addEventListener('ended', () => loadTrack(currentIndex + 1));
+        let idleTimer; function resetIdleTimer() { document.body.classList.remove('idle'); clearTimeout(idleTimer); idleTimer = setTimeout(() => { document.body.classList.add('idle'); }, 3000); }
+        document.addEventListener('mousemove', resetIdleTimer);
+
+        let audioCtx, analyser, dataArray, source, audioReady = false;
+        function setupAudio() { if(audioReady) return; audioCtx = new (window.AudioContext || window.webkitAudioContext)(); analyser = audioCtx.createAnalyser(); analyser.fftSize = 512; source = audioCtx.createMediaElementSource(video); source.connect(analyser); analyser.connect(audioCtx.destination); dataArray = new Uint8Array(analyser.frequencyBinCount); audioReady = true; }
+        function getFreq(start, end) { if(!dataArray) return 0; let sum = 0; for(let i=start; i<end; i++) sum += dataArray[i]; return sum / (end-start); }
+
+        let scene, camera, renderer, particleSystem, kaleidoPlane;
+        const auraCanvas = document.getElementById('aura-canvas'); const ctx = auraCanvas.getContext('2d', {alpha:false}); auraCanvas.width = 100; auraCanvas.height = 56;
+        function getVisibleSize(depth) { const vFOV = camera.fov * Math.PI / 180; const height = 2 * Math.tan(vFOV / 2) * Math.abs(camera.position.z - depth); const width = height * camera.aspect; return { width, height }; }
+
+        function initThree() {
+            scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x000000, 0.002);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 1, 3000); camera.position.z = 800;
+            renderer = new THREE.WebGLRenderer({alpha: true, antialias: true}); renderer.setSize(window.innerWidth, window.innerHeight);
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+            const videoTex = new THREE.VideoTexture(video); videoTex.minFilter = THREE.LinearFilter;
+
+            const bounds = getVisibleSize(0); 
+            const pGeo = new THREE.PlaneGeometry(bounds.width * 1.5, bounds.height * 1.5, 200, 100);
+            const pMat = new THREE.ShaderMaterial({
+                uniforms: { uTime: { value: 0 }, uTexture: { value: videoTex }, uBass: { value: 0.0 }, uTreble: { value: 0.0 }, uTheme: { value: 0.0 } },
+                vertexShader: `
+                    uniform sampler2D uTexture; uniform float uTime; uniform float uBass; uniform float uTreble; uniform float uTheme; varying vec3 vColor;
+                    float rand(vec2 co){ return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453); }
+                    void main() {
+                        vec3 pos = position; vec2 uv = uv;
+                        if(abs(uTheme - 2.0) < 0.1) { pos.x = floor(pos.x / 20.0) * 20.0; if(rand(uv + uTime) > 0.9) pos.x += (uBass * 100.0) * rand(uv); }
+                        if(abs(uTheme - 3.0) < 0.1) { float r = length(pos.xy); float a = atan(pos.y, pos.x) + uTime * 0.5 + (1.0/r)*100.0; pos.x = cos(a)*r; pos.y = sin(a)*r; pos.z += sin(r*0.05 - uTime*2.0)*100.0; }
+                        vec4 color = texture2D(uTexture, uv); 
+                        if(abs(uTheme - 4.0) < 0.1) { float b = dot(color.rgb, vec3(0.333)); color.rgb = mix(color.rgb, vec3(1.0, 0.85, 0.3) * b * 2.0, 0.7); }
+                        vColor = color.rgb; float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+                        float z = luma * 100.0 * (1.0 + uBass * 3.0);
+                        float wave = sin(uv.x * 5.0 + uTime) * (10.0 + uBass * 20.0);
+                        if(abs(uTheme - 4.0) < 0.1) { wave = sin(uv.x*10.0+uTime)*cos(uv.y*10.0+uTime)*50.0 + sin(uTime*2.0)*20.0; }
+                        vec4 mvPosition = modelViewMatrix * vec4(pos.x, pos.y + wave, pos.z + z, 1.0);
+                        float size = (4.0 * luma + 1.0) * (1.0 + uTreble * 2.0);
+                        if(abs(uTheme - 4.0) < 0.1) size *= 1.5;
+                        gl_PointSize = size * (500.0 / -mvPosition.z); gl_Position = projectionMatrix * mvPosition;
+                    }
+                `,
+                fragmentShader: `varying vec3 vColor; void main() { if(length(gl_PointCoord - 0.5) > 0.5) discard; gl_FragColor = vec4(vColor, 0.6); }`,
+                transparent: true, blending: THREE.AdditiveBlending
+            });
+            particleSystem = new THREE.Points(pGeo, pMat); scene.add(particleSystem);
+
+            const kBounds = getVisibleSize(-100);
+            const kGeo = new THREE.PlaneGeometry(kBounds.width, kBounds.height);
+            const kMat = new THREE.ShaderMaterial({
+                uniforms: { uTime: { value: 0 }, uTexture: { value: videoTex }, uBass: { value: 0.0 } },
+                vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+                fragmentShader: `
+                    uniform sampler2D uTexture; uniform float uTime; uniform float uBass; varying vec2 vUv;
+                    void main() {
+                        vec2 c = vUv - 0.5; float r = length(c); float a = atan(c.y, c.x);
+                        float s = 12.0; float seg = (3.14159 * 2.0) / s;
+                        a = mod(a, seg); a = abs(a - seg / 2.0);
+                        a += uTime * 0.1; r += uBass * 0.05; 
+                        
+                        // MIRROR WRAP (Kaleido Fix)
+                        vec2 uv = vec2(cos(a), sin(a)) * r + 0.5;
+                        uv = abs(mod(uv - 0.5, 1.0) - 0.5) * 2.0; 
+                        
+                        gl_FragColor = texture2D(uTexture, uv);
+                    }
+                `
+            });
+            kaleidoPlane = new THREE.Mesh(kGeo, kMat);
+            kaleidoPlane.position.z = -100; kaleidoPlane.visible = false; scene.add(kaleidoPlane);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if(video.readyState >= video.HAVE_CURRENT_DATA) ctx.drawImage(video, 0, 0, auraCanvas.width, auraCanvas.height);
+            let bass=0, treble=0; if(audioReady) { analyser.getByteFrequencyData(dataArray); bass = getFreq(0,10)/255; treble = getFreq(100,200)/255; }
+            if(particleSystem.visible) {
+                particleSystem.material.uniforms.uTime.value += 0.01;
+                particleSystem.material.uniforms.uBass.value += (bass - particleSystem.material.uniforms.uBass.value)*0.2;
+                particleSystem.material.uniforms.uTreble.value += (treble - particleSystem.material.uniforms.uTreble.value)*0.2;
+            }
+            if(kaleidoPlane.visible) {
+                kaleidoPlane.material.uniforms.uTime.value += 0.005;
+                kaleidoPlane.material.uniforms.uBass.value += (bass - kaleidoPlane.material.uniforms.uBass.value)*0.1;
+            }
+            renderer.render(scene, camera);
+        }
+
+        initThree(); animate();
+        window.addEventListener('resize', () => { camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); scene.remove(particleSystem); scene.remove(kaleidoPlane); initThree(); });
+    </script>
+</body>
+</html>
